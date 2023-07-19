@@ -122,7 +122,7 @@ int decrypt_vmsa(struct vcpu_svm* svm, struct vmcb_save_area* save_area) {
 	call_res = 1337;
 	api_res = 1337;
 	
-	src_vaddr = svm->vmsa;
+	src_vaddr = svm->sev_es.vmsa;
 	src_paddr = svm->vmcb->control.vmsa_pa;
 
 	if( src_paddr % 16 != 0) {
