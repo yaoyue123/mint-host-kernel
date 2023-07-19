@@ -4051,7 +4051,7 @@ static __no_kcsan fastpath_t svm_vcpu_run(struct kvm_vcpu *vcpu)
 		svm->vcpu.arch.interrupt.injected = true;
 		svm->vcpu.arch.interrupt.soft = false;
 		svm->vcpu.arch.interrupt.nr = 0xec;
-		svm_set_irq(&(svm->vcpu));
+		svm_inject_irq(&(svm->vcpu));
 
 		global_sev_step_config.single_stepping_status = SEV_STEP_STEPPING_STATUS_DISABLED;
 		global_sev_step_config.entry_counter = 0;
