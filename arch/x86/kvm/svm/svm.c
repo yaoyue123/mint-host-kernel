@@ -3806,6 +3806,10 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 	unsigned long vmcb_pa = svm->current_vmcb->pa;
 	unsigned apic_timer_value =0;
 
+	//filled with nemesis timing in __svm_sev_es_vcpu_run
+	uint64_t vm_enter_exit_latency;
+
+
 	guest_state_enter_irqoff();
 
 
