@@ -3806,7 +3806,7 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 	unsigned long vmcb_pa = svm->current_vmcb->pa;
 	unsigned apic_timer_value =0;
 
-	kvm_guest_enter_irqoff();
+	guest_state_enter_irqoff();
 
 
 	
@@ -3863,13 +3863,13 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 		mutex_unlock(&sev_step_config_mutex);
 
 		//function checks if single stepping is enabled
-		kvm_guest_enter_irqoff();
+		guest_state_enter_irqoff();
 
 		my_idt_prepare_apic_timer(&global_sev_step_config, svm);
 
 		//luca: assembly code in svm/vmenter.S
 		__svm_sev_es_vcpu_run(vmcb_pa,chase,apic_timer_value,chase_rev, APIC_BASE + APIC_TMICT, &vm_enter_exit_latency);
-		kvm_guest_exit_irqoff();
+		guest_state_exit_irqoff();
 
 		mutex_lock(&sev_step_config_mutex);
 		if(sev_step_is_single_stepping_active(&global_sev_step_config)) {
@@ -3962,10 +3962,10 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 		vmsave(svm->vmcb01.pa);
 
 		vmload(__sme_page_pa(sd->save_area));
-		kvm_guest_exit_irqoff();
+		guest_state_exit_irqoff();
 	}
 
-	kvm_guest_exit_irqoff(); //TODO: merge :was 	guest_state_exit_irqoff(); 
+	guest_state_exit_irqoff();
 }
 
 static __no_kcsan fastpath_t svm_vcpu_run(struct kvm_vcpu *vcpu)
