@@ -34,6 +34,12 @@ run_cmd ./scripts/config --enable  KVM_AMD_SEV
 run_cmd ./scripts/config --module  CRYPTO_DEV_CCP_DD
 run_cmd ./scripts/config --disable SYSTEM_TRUSTED_KEYS
 run_cmd ./scripts/config --disable SYSTEM_REVOCATION_KEYS
+run_cmd ./scripts/config --module  SEV_GUEST
+run_cmd ./scripts/config --disable IOMMU_DEFAULT_PASSTHROUGH
+run_cmd ./scripts/config --disable PREEMPT_COUNT
+run_cmd ./scripts/config --disable PREEMPTION
+run_cmd ./scripts/config --disable PREEMPT_DYNAMIC
+run_cmd ./scripts/config --disable DEBUG_PREEMPT
 
 run_cmd $MAKE olddefconfig
 
