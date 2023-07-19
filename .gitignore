@@ -166,3 +166,6 @@ sphinx_*/
 
 # Build files
 System.map-5.6.0-sev-es
+
+# tmp build files
+kheaders_data.tar.xz.tmp/
