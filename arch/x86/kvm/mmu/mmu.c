@@ -3949,12 +3949,12 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 	for(i = 0; i < sizeof(modes) / sizeof(modes[0]); i++ ) {
 		//check if page is tracked and if ctx is initialized
 		//otherwise no page fault event is sent to userspace
-		if(kvm_page_track_is_active(vcpu,gfn,modes[i])) {
+		if(kvm_page_track_is_active(vcpu,fault->gfn,modes[i])) {
 			//printk("page_fault_handle_page_track: found tracked page, running on core %d",smp_processor_id());
-			__untrack_single_page(vcpu, gfn, modes[i]);
+			__untrack_single_page(vcpu, fault->gfn, modes[i]);
 			//TODO: investigate if this is really required.
 			if(modes[i] == KVM_PAGE_TRACK_EXEC) {
-				__clear_nx_on_page(vcpu,gfn);
+				__clear_nx_on_page(vcpu,fault->gfn);
 			}
 			was_tracked = true;
 			mode = modes[i];
@@ -3965,7 +3965,7 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 		int send_ret = 0;
 		usp_page_fault_event_t pf_event = {
 			//.id = ,
-			.faulted_gpa = (uint64_t)(gfn << PAGE_SHIFT),
+			.faulted_gpa = (uint64_t)(fault->gfn << PAGE_SHIFT),
 			.is_decrypted_vmsa_data_valid = false,
 		};
 		mutex_lock(&sev_step_config_mutex);
@@ -3990,17 +3990,12 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 			}
 	}
 	
-	if (unlikely(error_code & PFERR_RSVD_MASK))
-		return false;
-
-	if (!fault->present || !fault->write)
-		return false;
 
 	/*
 	 * guest is writing the page which is write tracked which can
 	 * not be fixed by page fault handler.
 	 */
-	if (kvm_slot_page_track_is_active(vcpu->kvm, fault->slot, fault->gfn, KVM_PAGE_TRACK_WRITE) || kvm_page_track_is_active(vcpu, gfn, KVM_PAGE_TRACK_ACCESS))
+	if (kvm_slot_page_track_is_active(vcpu->kvm, fault->slot, fault->gfn, KVM_PAGE_TRACK_WRITE) || kvm_page_track_is_active(vcpu, fault->gfn, KVM_PAGE_TRACK_ACCESS))
 		return true;
 
 	return false;
