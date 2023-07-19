@@ -4078,7 +4078,7 @@ static __no_kcsan fastpath_t svm_vcpu_run(struct kvm_vcpu *vcpu)
 
 		if (global_sev_step_config.do_tlb_flush_before_each_step ) {
 			svm_ssdbg_log("Flushing guest tlb\n");
-			svm_flush_tlb(&(svm->vcpu)); //flushes whole tlb of guest //HUGE IMPROVEMENT!!!
+			svm_flush_tlb_current(&(svm->vcpu)); //flushes whole tlb of guest //HUGE IMPROVEMENT!!!
 		} else {
 			svm_ssdbg_log("NOT flushing guest tlb\n");
 		}
