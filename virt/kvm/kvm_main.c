@@ -4895,7 +4895,8 @@ static int get_aliased_mapping_for_gpa(uint64_t gpa, uint64_t* hva_alias,
 
 
 	gfn = gpa >> 12;
-	tmp_hva = kvm_vcpu_gfn_to_hva(global_sev_step_config.main_vm->vcpus[0],gfn);
+
+	tmp_hva = kvm_vcpu_gfn_to_hva(xa_load(&global_sev_step_config.main_vm->vcpu_array,0),gfn);
 	mmap_read_lock(global_sev_step_config.main_vm->mm);
 	locked = 1;
 	if (pin_user_pages_remote(global_sev_step_config.main_vm->mm,
@@ -5531,7 +5532,7 @@ static long kvm_dev_ioctl(struct file *filp,
 			return -EFAULT;
 		}
 
-		if (!__track_single_page(global_sev_step_config.main_vm->vcpus[0],
+		if (!__track_single_page(xa_load(&global_sev_step_config.main_vm->vcpu_array,0),
 					 param.gpa >> PAGE_SHIFT,
 					 param.track_mode)) {
 			printk("KVM_TRACK_PAGE: __track_single_page failed");
@@ -5556,7 +5557,7 @@ static long kvm_dev_ioctl(struct file *filp,
 			return -EFAULT;
 		}
 
-		if (!__untrack_single_page(global_sev_step_config.main_vm->vcpus[0],
+		if (!__untrack_single_page(xa_load(&global_sev_step_config.main_vm->vcpu_array,0),
 					   param.gpa >> PAGE_SHIFT,
 					   param.track_mode)) {
 			printk("KVM_UNTRACK_PAGE: __track_single_page failed");
@@ -5587,7 +5588,7 @@ static long kvm_dev_ioctl(struct file *filp,
 		}
 
 		tracked_pages =
-			kvm_start_tracking(global_sev_step_config.main_vm->vcpus[0], param.track_mode);
+			kvm_start_tracking(xa_load(&global_sev_step_config.main_vm->vcpu_array,0), param.track_mode);
 		kvmm_ssdbg_log("KVM_TRACK_ALL_PAGES: tracked %lu pages\n",tracked_pages);
 
 		r = 0;
@@ -5614,7 +5615,7 @@ static long kvm_dev_ioctl(struct file *filp,
 		}
 
 		untrack_count =
-			kvm_stop_tracking(global_sev_step_config.main_vm->vcpus[0], param.track_mode);
+			kvm_stop_tracking(xa_load(&global_sev_step_config.main_vm->vcpu_array,0), param.track_mode);
 		kvmm_ssdbg_log("KVM_UNTRACK_ALL_PAGES: untracked %lu pages\n",untrack_count);
 
 		r = 0;
@@ -5705,9 +5706,9 @@ static long kvm_dev_ioctl(struct file *filp,
 
 			// Resetting tracking
 			mutex_lock(&sev_step_config_mutex);
-			kvm_stop_tracking(global_sev_step_config.main_vm->vcpus[0],KVM_PAGE_TRACK_EXEC);
-			kvm_stop_tracking(global_sev_step_config.main_vm->vcpus[0],KVM_PAGE_TRACK_ACCESS);
-			kvm_stop_tracking(global_sev_step_config.main_vm->vcpus[0],KVM_PAGE_TRACK_WRITE);
+			kvm_stop_tracking(xa_load(&global_sev_step_config.main_vm->vcpu_array,0),KVM_PAGE_TRACK_EXEC);
+			kvm_stop_tracking(xa_load(&global_sev_step_config.main_vm->vcpu_array,0),KVM_PAGE_TRACK_ACCESS);
+			kvm_stop_tracking(xa_load(&global_sev_step_config.main_vm->vcpu_array,0),KVM_PAGE_TRACK_WRITE);
 			global_sev_step_config.decrypt_vmsa = false;
 			mutex_unlock(&sev_step_config_mutex);
 
@@ -5825,7 +5826,7 @@ static long kvm_dev_ioctl(struct file *filp,
 			return -EINVAL;
 		}
 
-		kvm_inject_nmi(global_sev_step_config.main_vm->vcpus[0]);
+		kvm_inject_nmi(xa_load(&global_sev_step_config.main_vm->vcpu_array,0));
 		mutex_unlock(&sev_step_config_mutex);
 
 	}
@@ -6381,7 +6382,7 @@ static long kvm_dev_ioctl(struct file *filp,
 		offset = param.in_gpa & 0xfff;
 		gfn = param.in_gpa >> 12;
 
-		hva = kvm_vcpu_gfn_to_hva(global_sev_step_config.main_vm->vcpus[0],gfn);
+		hva = kvm_vcpu_gfn_to_hva(xa_load(&global_sev_step_config.main_vm->vcpu_array,0),gfn);
 		
 		mmap_read_lock(global_sev_step_config.main_vm->mm);
 		locked = 1;
@@ -6422,16 +6423,16 @@ static long kvm_dev_ioctl(struct file *filp,
 		param.out_hpa = (pfn << 12) | offset;*/
 
 		/*printk("KVM_SEV_STEP_GPA_TO_HPA: gpa 0x%llx, gfn 0x%llx, offset 0x%llx\n",param.in_gpa,gfn,offset);
-		pfn = kvm_vcpu_gfn_to_pfn(global_sev_step_config.main_vm->vcpus[0],gfn);
+		pfn = kvm_vcpu_gfn_to_pfn(xa_load(&global_sev_step_config.main_vm->vcpu_array,0),gfn);
 		param.out_hpa = (pfn << 12) | offset;
 		printk("KVM_SEV_STEP_GPA_TO_HPA: pfn 0x%llx, out_hpa 0x%llx\n",pfn,param.out_hpa);
 		printk("KVM_SEV_STEP_GPA_TO_HPA: is_error_pfn %d, is_error_noslot_pfn %d, is_noslot_pfn %d\n",
 			is_error_pfn(pfn),is_error_noslot_pfn(pfn), is_noslot_pfn(pfn) );
 
-		pfn = kvm_vcpu_gfn_to_pfn_atomic(global_sev_step_config.main_vm->vcpus[0],gfn);
+		pfn = kvm_vcpu_gfn_to_pfn_atomic(xa_load(&global_sev_step_config.main_vm->vcpu_array,0),gfn);
 		printk("KVM_SEV_STEP_GPA_TO_HPA: pfn 0x%llx",(uint64_t)pfn);
 
-		hva = kvm_vcpu_gfn_to_hva(global_sev_step_config.main_vm->vcpus[0],gfn);
+		hva = kvm_vcpu_gfn_to_hva(xa_load(&global_sev_step_config.main_vm->vcpu_array,0),gfn);
 		printk("KVM_SEV_STEP_GPA_TO_HPA: hva 0x%llx",(uint64_t)hva);
 		printk("KVM_SEV_STEP_GPA_TO_HPA: virt_to_phys on hva : 0x%llx\n",virt_to_phys((void*)hva));
 		*/
