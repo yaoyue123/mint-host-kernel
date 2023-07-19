@@ -14,6 +14,19 @@
 #include <linux/ioctl.h>
 #include <asm/kvm.h>
 
+//
+// SEV STEP
+//
+
+#include <linux/sev-step/sev-step.h>
+
+#ifdef __KERNEL__
+#include <uapi/linux/sev-step/sev-step.h>
+#else
+#include <linux/sev-step/sev-step.h>
+#endif
+
+
 #define KVM_API_VERSION 12
 
 /* *** Deprecated interfaces *** */
@@ -2174,4 +2187,62 @@ struct kvm_stats_desc {
 /* Available with KVM_CAP_XSAVE2 */
 #define KVM_GET_XSAVE2		  _IOR(KVMIO,  0xcf, struct kvm_xsave)
 
+
+//
+// SEV-STEP IOCTLs
+//
+#define KVM_TRACK_PAGE _IOWR(KVMIO, 0xb, track_page_param_t)
+#define KVM_TRACK_ALL_PAGES _IOWR(KVMIO, 0xc, track_all_pages_t)
+#define KVM_UNTRACK_ALL_PAGES _IOWR(KVMIO, 0xd, track_all_pages_t)
+#define KVM_UNTRACK_PAGE _IOWR(KVMIO, 0xe, track_page_param_t)
+#define KVM_USP_INIT_POLL_API _IOWR(KVMIO, 0xf, usp_init_poll_api_t)
+#define KVM_USP_CLOSE_POLL_API _IO(KVMIO, 0x10)
+#define KVM_SEV_STEP_ENABLE _IOWR(KVMIO, 0x11, sev_step_param_t)
+#define KVM_SEV_STEP_DISABLE _IO(KVMIO, 0x12)
+/**
+ * @brief Injects an nmi into vm upon next vmrun.
+ * Should only be called while vm is halted
+ * 
+ */
+#define KVM_SEV_STEP_INJECT_NMI _IO(KVMIO, 0x13)
+
+/**
+ * @brief Build an L1D way predictor eviction set in kernel space
+ * //TODO: probpably abandon in favor of KVM_SET_STEP_IMPORT_USER_EVS
+ * 
+ */
+#define KVM_SEV_STEP_BUILD_EVS _IOWR(KVMIO, 0x15, build_eviction_set_param_t)
+/**
+ * @brief Free eviction set that has been allocated with either KVM_SEV_STEP_BUILD_EVS or
+ * KVM_SET_STEP_IMPORT_USER_EVS
+ * 
+ */
+#define KVM_SEV_STEP_FREE_EVS _IO(KVMIO, 0x16)
+
+/**
+ * @brief "Imports" an eviction set built in userspace by pinning the pages and creating mappings
+ * to the underlying pages, so that we can use the eviction set anywhere in the kernel space.
+ * Note: Does not work for way predictor based eviction sets, as these depend on the virtual address, which
+ * changes when we create our kernel space mapping (in constrast to the underlying physical page, which stays the same)
+ * 
+ */
+#define KVM_SET_STEP_IMPORT_USER_EVS _IOWR(KVMIO, 0x17, import_user_eviction_set_param_t)
+
+/**
+ * @brief Perform a cache attack on the next (single) step. Eviction set must already be loaded.
+ * Result will be part of the step event
+ * 
+ */
+#define KVM_SEV_STEP_DO_CACHE_ATTACK_NEXT_STEP _IOWR(KVMIO, 0x18, do_cache_attack_param_t)
+
+/**
+ * @brief Resolves the Guest Physical Adress to an Host Physical Adress.
+ * This is e.g. required to build eviction sets that are based on the physical adress
+ * 
+ */
+#define KVM_SEV_STEP_GPA_TO_HPA _IOWR(KVMIO, 0x19, gpa_to_hpa_param_t)
+
+#define KVM_SEV_STEP_CACHE_ATTACK_TESTBED _IO(KVMIO, 0x20)
+
+#define KVM_SEV_STEP_BUILD_ALIAS_EVS _IOWR(KVMIO, 0x21, build_eviction_set_param_t )
 #endif /* __LINUX_KVM_H */

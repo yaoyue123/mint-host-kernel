@@ -21,6 +21,7 @@
 
 #include <asm/svm.h>
 #include <asm/sev-common.h>
+#include "../kvm_cache_regs.h"
 
 #include "kvm_cache_regs.h"
 
@@ -725,7 +726,7 @@ int sev_snp_update_protected_guest_state(struct kvm_vcpu *vcpu);
 
 /* vmenter.S */
 
-void __svm_sev_es_vcpu_run(unsigned long vmcb_pa);
+void __svm_sev_es_vcpu_run(unsigned long vmcb_pa,void* chase, unsigned apic_timer_value, void* chase_rev, uint64_t apic_mem_addr, uint64_t* latency);
 void __svm_vcpu_run(unsigned long vmcb_pa, unsigned long *regs);
 
 #endif

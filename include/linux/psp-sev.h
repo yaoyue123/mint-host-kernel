@@ -799,6 +799,8 @@ struct sev_data_snp_shutdown_ex {
 
 #ifdef CONFIG_CRYPTO_DEV_SP_PSP
 
+int sev_do_cmd(int cmd, void *data, int *psp_ret);
+
 /**
  * sev_platform_init - perform SEV INIT command
  *
@@ -1057,6 +1059,8 @@ static inline int snp_guest_ext_guest_request(struct sev_data_snp_guest_request 
 {
 	return -ENODEV;
 }
+
+static inline int sev_do_cmd(int cmd, void *data, int *psp_ret) { return -ENODEV};
 
 #endif	/* CONFIG_CRYPTO_DEV_SP_PSP */
 

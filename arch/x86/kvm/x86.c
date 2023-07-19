@@ -85,6 +85,11 @@
 #define CREATE_TRACE_POINTS
 #include "trace.h"
 
+
+
+#include <linux/sev-step/my_idt.h>
+
+
 #define MAX_IO_MSRS 256
 #define KVM_MAX_MCE_BANKS 32
 u64 __read_mostly kvm_mce_cap_supported = MCG_CTL_P | MCG_SER_P;
@@ -10186,10 +10191,18 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	}
 
 	preempt_disable();
+	//this snippet requires interrupts enabled
+	mutex_lock(&sev_step_config_mutex);
+	my_idt_init_idt(&global_sev_step_config);
+	mutex_unlock(&sev_step_config_mutex);
+
 
 	static_call(kvm_x86_prepare_switch_to_guest)(vcpu);
 
-	/*
+
+	//luca: vcpu interrupt investigation: interrupt disable
+
+/*
 	 * Disable IRQs before setting IN_GUEST_MODE.  Posted interrupt
 	 * IPI are then delayed after guest entry, which ensures that they
 	 * result in virtual interrupt delivery.

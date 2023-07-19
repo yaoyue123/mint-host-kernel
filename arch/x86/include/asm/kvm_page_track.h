@@ -2,10 +2,7 @@
 #ifndef _ASM_X86_KVM_PAGE_TRACK_H
 #define _ASM_X86_KVM_PAGE_TRACK_H
 
-enum kvm_page_track_mode {
-	KVM_PAGE_TRACK_WRITE,
-	KVM_PAGE_TRACK_MAX,
-};
+#include <uapi/asm/kvm_page_track.h>
 
 /*
  * The notifier represented by @kvm_page_track_notifier_node is linked into
@@ -60,6 +57,17 @@ int kvm_page_track_create_memslot(struct kvm *kvm,
 void kvm_slot_page_track_add_page(struct kvm *kvm,
 				  struct kvm_memory_slot *slot, gfn_t gfn,
 				  enum kvm_page_track_mode mode);
+
+/**
+ * @brief Like kvm_slot_page_track_add_page, but user has to explicitly
+ * call kvm_flush_remote_tlbs(kvm) once he is done. If we batch track many
+ * pages, this is much faster
+ * 
+ */
+void kvm_slot_page_track_add_page_no_flush(struct kvm *kvm,
+				  struct kvm_memory_slot *slot, gfn_t gfn,
+				  enum kvm_page_track_mode mode);
+
 void kvm_slot_page_track_remove_page(struct kvm *kvm,
 				     struct kvm_memory_slot *slot, gfn_t gfn,
 				     enum kvm_page_track_mode mode);
