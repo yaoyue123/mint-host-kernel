@@ -350,9 +350,11 @@ long kvm_start_tracking(struct kvm_vcpu *vcpu,enum kvm_page_track_mode mode ) {
         struct kvm_memory_slot *slot;
         int idx;
 
-
-        iterat_max = vcpu->kvm->memslots[0]->memslots[0].base_gfn 
-		     + vcpu->kvm->memslots[0]->memslots[0].npages;
+		//TODO: merge: luca: double previously we did select by index, ignoring the id
+		//double check that this is equal
+		slot = id_to_memslot(vcpu->kvm->memslots[0],0);
+    	iterat_max = slot->base_gfn + slot->npages;
+		printk("%s:%d [%s] base_gfn = %llu, npages=%lu",__FILE__, __LINE__, __FUNCTION__, slot->base_gfn, slot->npages);
 		idx = srcu_read_lock(&vcpu->kvm->srcu);
 		write_lock(&vcpu->kvm->mmu_lock);
         for (iterator=0; iterator < iterat_max; iterator++)
@@ -383,8 +385,11 @@ long kvm_stop_tracking(struct kvm_vcpu *vcpu,enum kvm_page_track_mode mode ) {
 		struct kvm_memory_slot *slot;
 		int idx;
 
-        iterat_max = vcpu->kvm->memslots[0]->memslots[0].base_gfn + 
-		     vcpu->kvm->memslots[0]->memslots[0].npages;
+		//TODO: merge: luca: double previously we did select by index, ignoring the id
+		//double check that this is equal
+    	slot = id_to_memslot(vcpu->kvm->memslots[0],0);
+    	iterat_max = slot->base_gfn + slot->npages;
+		printk("%s:%d [%s] base_gfn = %llu, npages=%lu",__FILE__, __LINE__, __FUNCTION__, slot->base_gfn, slot->npages);
 		idx = srcu_read_lock(&vcpu->kvm->srcu);
 		write_lock(&vcpu->kvm->mmu_lock);
         for (iterator=0; iterator < iterat_max; iterator++)
