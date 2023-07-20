@@ -345,36 +345,40 @@ EXPORT_SYMBOL(__track_single_page);
 
 //track all pages; taken from severed repo
 long kvm_start_tracking(struct kvm_vcpu *vcpu,enum kvm_page_track_mode mode ) {
-        long count = 0;
-        u64 iterator, iterat_max;
-        struct kvm_memory_slot *slot;
-        int idx;
+	long count = 0;
+	u64 iterator, iterat_max;
+	struct kvm_memslots* slots;
+	struct kvm_memory_slot *slot;
+	int srcu_lock_retval,bkt,i;
 
-		//TODO: merge: luca: double previously we did select by index, ignoring the id
-		//double check that this is equal
-		slot = id_to_memslot(vcpu->kvm->memslots[0],0);
-    	iterat_max = slot->base_gfn + slot->npages;
-		printk("%s:%d [%s] base_gfn = %llu, npages=%lu",__FILE__, __LINE__, __FUNCTION__, slot->base_gfn, slot->npages);
-		idx = srcu_read_lock(&vcpu->kvm->srcu);
-		write_lock(&vcpu->kvm->mmu_lock);
-        for (iterator=0; iterator < iterat_max; iterator++)
-        {
-			slot = kvm_vcpu_gfn_to_memslot(vcpu, iterator);
-			if ( slot != NULL ) {
+	for( i = 0; i < KVM_ADDRESS_SPACE_NUM; i++) {
+		slots = __kvm_memslots(vcpu->kvm,i);
+		kvm_for_each_memslot(slot, bkt, slots) {
+			iterat_max = slot->base_gfn + slot->npages;
+			printk("%s:%d [%s] base_gfn = %llu, npages=%lu",__FILE__, __LINE__, __FUNCTION__, slot->base_gfn, slot->npages);
+			srcu_lock_retval = srcu_read_lock(&vcpu->kvm->srcu);
+			write_lock(&vcpu->kvm->mmu_lock);
+			for (iterator=0; iterator < iterat_max; iterator++)
+			{
+				slot = kvm_vcpu_gfn_to_memslot(vcpu, iterator);
+				if ( slot != NULL ) {
 					if( !kvm_page_track_is_active(vcpu, iterator, mode)) {
 						kvm_slot_page_track_add_page_no_flush(vcpu->kvm, slot, iterator, mode);
+						count++;
 					}
-					count++;
+				}
+				if( need_resched() || rwlock_needbreak(&vcpu->kvm->mmu_lock))  {
+					cond_resched_rwlock_write(&vcpu->kvm->mmu_lock);
+				}
 			}
-        }
-		
-		if( count > 0 ) {
-			kvm_flush_remote_tlbs(vcpu->kvm);
+			write_unlock(&vcpu->kvm->mmu_lock);
+			srcu_read_unlock(&vcpu->kvm->srcu, srcu_lock_retval);
 		}
-		write_unlock(&vcpu->kvm->mmu_lock);
-		srcu_read_unlock(&vcpu->kvm->srcu, idx);
-
-        return count;
+	}
+	if( count > 0 ) {
+		kvm_flush_remote_tlbs(vcpu->kvm);
+	}
+    return count;
 }
 EXPORT_SYMBOL(kvm_start_tracking);
 
@@ -382,35 +386,37 @@ EXPORT_SYMBOL(kvm_start_tracking);
 long kvm_stop_tracking(struct kvm_vcpu *vcpu,enum kvm_page_track_mode mode ) {
 		long count = 0;
 		u64 iterator, iterat_max;
+		struct kvm_memslots* slots;
 		struct kvm_memory_slot *slot;
-		int idx;
+		int srcu_lock_retval,bkt,i;
 
-		//TODO: merge: luca: double previously we did select by index, ignoring the id
-		//double check that this is equal
-    	slot = id_to_memslot(vcpu->kvm->memslots[0],0);
-    	iterat_max = slot->base_gfn + slot->npages;
-		printk("%s:%d [%s] base_gfn = %llu, npages=%lu",__FILE__, __LINE__, __FUNCTION__, slot->base_gfn, slot->npages);
-		idx = srcu_read_lock(&vcpu->kvm->srcu);
-		write_lock(&vcpu->kvm->mmu_lock);
-        for (iterator=0; iterator < iterat_max; iterator++)
-        {
-			slot = kvm_vcpu_gfn_to_memslot(vcpu, iterator);
-			if ( slot != NULL &&
-				kvm_page_track_is_active(vcpu, iterator,  mode)) {
-				kvm_slot_page_track_remove_page(vcpu->kvm, 
-								slot, 
-								iterator, 
-								mode);
-				
-				count++;
-            	}
-			if( need_resched() || rwlock_needbreak(&vcpu->kvm->mmu_lock))  {
-				cond_resched_rwlock_write(&vcpu->kvm->mmu_lock);
+		for( i = 0; i < KVM_ADDRESS_SPACE_NUM; i++) {
+			slots = __kvm_memslots(vcpu->kvm,i);
+			kvm_for_each_memslot(slot, bkt, slots) {
+				iterat_max = slot->base_gfn + slot->npages;
+				printk("%s:%d [%s] base_gfn = %llu, npages=%lu",__FILE__, __LINE__, __FUNCTION__, slot->base_gfn, slot->npages);
+				srcu_lock_retval = srcu_read_lock(&vcpu->kvm->srcu);
+				write_lock(&vcpu->kvm->mmu_lock);
+				for (iterator=0; iterator < iterat_max; iterator++)
+				{
+					slot = kvm_vcpu_gfn_to_memslot(vcpu, iterator);
+					if( slot != NULL && kvm_page_track_is_active(vcpu, iterator,  mode)) {
+						kvm_slot_page_track_remove_page(vcpu->kvm, 
+										slot, 
+										iterator, 
+										mode);
+						
+						count++;
+					}
+					if( need_resched() || rwlock_needbreak(&vcpu->kvm->mmu_lock))  {
+						cond_resched_rwlock_write(&vcpu->kvm->mmu_lock);
+					}
+				}
+				write_unlock(&vcpu->kvm->mmu_lock);
+				srcu_read_unlock(&vcpu->kvm->srcu, srcu_lock_retval);
 			}
-        }
-		write_unlock(&vcpu->kvm->mmu_lock);
-		srcu_read_unlock(&vcpu->kvm->srcu, idx);
-        return count;
+		}
+    return count;
 }
 EXPORT_SYMBOL(kvm_stop_tracking);
 
