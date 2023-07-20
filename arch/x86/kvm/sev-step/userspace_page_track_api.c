@@ -212,7 +212,7 @@ int usp_poll_init_user_vaddr(int pid,uint64_t user_vaddr_shared_mem,usp_poll_api
    
 
 
-    shared_mem_kern_mapping = (shared_mem_region_t*)vmap(shared_mem_pages,shared_mem_pages_len,0,PAGE_SHARED);
+    shared_mem_kern_mapping = (shared_mem_region_t*)vmap(shared_mem_pages,shared_mem_pages_len,0,PAGE_KERNEL);
     if( shared_mem_kern_mapping == NULL ) {
         printk("usp_poll_init_user_vaddr: failed to get virtual mapping for page struct\n");
         return 1;
