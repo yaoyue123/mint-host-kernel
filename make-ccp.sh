@@ -13,8 +13,8 @@ cp "/boot/System.map-$(uname -r)" .
 cp "/boot/System.map-$(uname -r)" "$MODPATH"
 touch .scmversion &&
 make -j $cores modules M="$MODPATH" LOCALVERSION= &&
-make modules_install M="$MODPATH" LOCALVERSION= 
+sudo make modules_install M="$MODPATH" LOCALVERSION= 
 
 echo "Installing module file"
-cp ./drivers/crypto/ccp/ccp.ko "/lib/modules/$(uname -r)/kernel/drivers/crypto/ccp/ccp.ko"
-cp ./drivers/crypto/ccp/ccp-crypto.ko "/lib/modules/$(uname -r)/kernel/drivers/crypto/ccp/ccp-crypto.ko"
+sudo cp ./drivers/crypto/ccp/ccp.ko "/lib/modules/$(uname -r)/kernel/drivers/crypto/ccp/ccp.ko"
+sudo cp ./drivers/crypto/ccp/ccp-crypto.ko "/lib/modules/$(uname -r)/kernel/drivers/crypto/ccp/ccp-crypto.ko"
