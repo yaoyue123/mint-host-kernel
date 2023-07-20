@@ -40,7 +40,7 @@ int usp_send_and_block(usp_poll_api_ctx_t* ctx, usp_event_type_t event_type, voi
     uint64_t event_bytes = 0;
     uint64_t abort_after = 0;
     uint64_t event_buffer_offset = 0;
-    const uint64_t sec_to_nanosec = 100000000000ULL;
+    const uint64_t sec_to_nanosec = 1000000000ULL;
 
 
 /*
@@ -138,7 +138,7 @@ we also reset have_event
     //wait until we are allowed to send the next event
     //wait for ack, but with tiemout. Otherwise small bugs in userland easily lead
     //to a kernel hang
-    abort_after = ktime_get_ns() + 3ULL * sec_to_nanosec;
+    abort_after = ktime_get_ns() + 10ULL * sec_to_nanosec;
     //printk("usp_send_and_block: waiting with return untill user acked...\n");
     while(1) {
         raw_spinlock_lock(&ctx->shared_mem_region->spinlock);
