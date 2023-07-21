@@ -355,7 +355,6 @@ long kvm_start_tracking(struct kvm_vcpu *vcpu,enum kvm_page_track_mode mode ) {
 		slots = __kvm_memslots(vcpu->kvm,i);
 		kvm_for_each_memslot(slot, bkt, slots) {
 			iterat_max = slot->base_gfn + slot->npages;
-			printk("%s:%d [%s] base_gfn = %llu, npages=%lu",__FILE__, __LINE__, __FUNCTION__, slot->base_gfn, slot->npages);
 			srcu_lock_retval = srcu_read_lock(&vcpu->kvm->srcu);
 			write_lock(&vcpu->kvm->mmu_lock);
 			for (iterator=0; iterator < iterat_max; iterator++)
@@ -394,7 +393,6 @@ long kvm_stop_tracking(struct kvm_vcpu *vcpu,enum kvm_page_track_mode mode ) {
 			slots = __kvm_memslots(vcpu->kvm,i);
 			kvm_for_each_memslot(slot, bkt, slots) {
 				iterat_max = slot->base_gfn + slot->npages;
-				printk("%s:%d [%s] base_gfn = %llu, npages=%lu",__FILE__, __LINE__, __FUNCTION__, slot->base_gfn, slot->npages);
 				srcu_lock_retval = srcu_read_lock(&vcpu->kvm->srcu);
 				write_lock(&vcpu->kvm->mmu_lock);
 				for (iterator=0; iterator < iterat_max; iterator++)
