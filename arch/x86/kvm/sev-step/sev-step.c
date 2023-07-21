@@ -496,7 +496,7 @@ int sev_step_get_vmcb_save_area(struct kvm_vcpu *vcpu, struct vmcb_save_area* vm
 						 __pa(save) >> PAGE_SHIFT,
 						 &error);
 		if (ret) {
-			pr_err("%s: sev_snp_guest : failed to decrypt vmsa %d\n", __func__, error);
+			pr_err("%s: sev_snp_guest : failed to decrypt vmsa with ret=%d,  error=0x%x, (dec) error=%d\n", __func__, ret, error,error);
 			return 1;
 		}
 
