@@ -18,3 +18,8 @@ sudo make modules_install M="$MODPATH" LOCALVERSION=
 echo "Installing module file"
 sudo cp ./drivers/crypto/ccp/ccp.ko "/lib/modules/$(uname -r)/kernel/drivers/crypto/ccp/ccp.ko"
 sudo cp ./drivers/crypto/ccp/ccp-crypto.ko "/lib/modules/$(uname -r)/kernel/drivers/crypto/ccp/ccp-crypto.ko"
+
+echo "Reload module"
+sudo modprobe -r kvm_amd
+sudo modprobe -r ccp
+sudo modprobe ccp kvm_amd
