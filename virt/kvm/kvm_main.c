@@ -4901,6 +4901,7 @@ static int get_aliased_mapping_for_gpa(uint64_t gpa, uint64_t* hva_alias,
 	locked = 1;
 	if (pin_user_pages_remote(global_sev_step_config.main_vm->mm,
 		tmp_hva, 1, FOLL_LONGTERM, &page,NULL,&locked) != 1) {
+		mmap_read_unlock(global_sev_step_config.main_vm->mm);
 		printk("get_user_pages_remote_unlocked failed\n");
 		return 1;
 	} else {
