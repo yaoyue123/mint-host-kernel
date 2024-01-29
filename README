@@ -1,18 +1,18 @@
-Linux kernel
-============
+# SEV-Step Kernel
 
-There are several guides for kernel developers and users. These guides can
-be rendered in a number of formats, like HTML and PDF. Please read
-Documentation/admin-guide/README.rst first.
+## Overview
 
-In order to build the documentation, use ``make htmldocs`` or
-``make pdfdocs``.  The formatted documentation can also be read online at:
+This is a patched version of the Linux kernel that includes the changes for the SEV-Step framework.
 
-    https://www.kernel.org/doc/html/latest/
+The main part of the added code is in the `arch/x86/kvm/sev-step/` folder. However, as certain parts of the code
+need to interface closely with VM entry and exit as well as the MMU, there is a little bit of code sprinkled through the kernel.
+To get a full picture of the changes, do a diff against the git commit `c4daeffce56eebb52ec70ec59a202b879cd1c4fc`.
 
-There are various text files in the Documentation/ subdirectory,
-several of them using the Restructured Text markup notation.
+The IOCTL API used by the SEV-Step framework is defined/documented in
+`include/uapi/linux/kvm.h` and the used data structures are defined in `include/uapi/linux/sev-step/sev-step.h`. These headers are part of the headers that are exported for userspace applications and can thus easily be used from C code.
 
-Please read the Documentation/process/changes.rst file, as it contains the
-requirements for building and running the kernel, and information about
-the problems which may result by upgrading your kernel.
+If you want to use them in your own application just add `<sev step kernel dir>/kernel/usr/include` to the list of files that are searched for includes.
+Afterward, you can e.g. use `#include "linux/kvm.h"` to include the `kvm.h` header.
+
+## Build
+See the main SEV-Step repo for information on building the kernel as well the compatible QEMU + OVMF versions.
