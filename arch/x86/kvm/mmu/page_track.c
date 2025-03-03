@@ -133,6 +133,14 @@ void kvm_slot_page_track_add_page(struct kvm *kvm,
 
 	if (kvm_mmu_slot_gfn_protect(kvm, slot, gfn, PG_LEVEL_4K,mode))
 		kvm_flush_remote_tlbs(kvm);
+    
+    if (mode == KVM_PAGE_TRACK_WRITE)
+		if (kvm_mmu_slot_gfn_write_protect(kvm, slot, gfn, PG_LEVEL_4K))
+			kvm_flush_remote_tlbs(kvm);
+	
+	if (mode == KVM_PAGE_TRACK_EXEC)
+		if (kvm_mmu_slot_gfn_protect(kvm, slot, gfn, PG_LEVEL_4K, KVM_PAGE_TRACK_EXEC))
+			kvm_flush_remote_tlbs(kvm);
 }
 EXPORT_SYMBOL_GPL(kvm_slot_page_track_add_page);
 
@@ -141,6 +149,10 @@ void kvm_slot_page_track_add_page_no_flush(struct kvm *kvm,
 				  enum kvm_page_track_mode mode) {
 	if (WARN_ON(!page_track_mode_is_valid(mode)))
 		return;
+
+    if (WARN_ON(mode == KVM_PAGE_TRACK_WRITE &&
+        !kvm_page_track_write_tracking_enabled(kvm)))
+    return;
 
 	update_gfn_track(slot, gfn, mode, 1);
 
@@ -151,6 +163,13 @@ void kvm_slot_page_track_add_page_no_flush(struct kvm *kvm,
 	kvm_mmu_gfn_disallow_lpage(slot, gfn);
 
 	kvm_mmu_slot_gfn_protect(kvm, slot, gfn, PG_LEVEL_4K,mode);
+
+    if (mode == KVM_PAGE_TRACK_WRITE)
+		kvm_mmu_slot_gfn_write_protect(kvm, slot, gfn, PG_LEVEL_4K);
+
+
+	if (mode == KVM_PAGE_TRACK_EXEC)
+		kvm_mmu_slot_gfn_protect(kvm, slot, gfn, PG_LEVEL_4K, KVM_PAGE_TRACK_EXEC);
 }
 EXPORT_SYMBOL_GPL(kvm_slot_page_track_add_page_no_flush);
 
@@ -185,7 +204,7 @@ void kvm_slot_page_track_remove_page(struct kvm *kvm,
 	 * allow large page mapping for the tracked page
 	 * after the tracker is gone.
 	 */
-	kvm_mmu_gfn_allow_lpage(slot, gfn);
+	// kvm_mmu_gfn_allow_lpage(slot, gfn);
 }
 EXPORT_SYMBOL_GPL(kvm_slot_page_track_remove_page);
 

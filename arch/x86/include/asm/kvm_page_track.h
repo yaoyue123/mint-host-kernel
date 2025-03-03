@@ -85,4 +85,22 @@ kvm_page_track_unregister_notifier(struct kvm *kvm,
 void kvm_page_track_write(struct kvm_vcpu *vcpu, gpa_t gpa, const u8 *new,
 			  int bytes);
 void kvm_page_track_flush_slot(struct kvm *kvm, struct kvm_memory_slot *slot);
+
+// heckler ----
+void kvm_slot_page_track_add_page_no_flush(struct kvm *kvm,
+    struct kvm_memory_slot *slot, gfn_t gfn,
+    enum kvm_page_track_mode mode);
+
+
+bool kvm_vcpu_exec_protect_gfn(struct kvm_vcpu *vcpu, u64 gfn, bool flush);
+
+bool kvm_vcpu_exec_unprotect_gfn(struct kvm_vcpu *vcpu, u64 gfn, bool flush);
+
+bool kvm_mmu_slot_gfn_protect(struct kvm *kvm,
+      struct kvm_memory_slot *slot, u64 gfn,
+      int min_level,
+      enum kvm_page_track_mode mode);
+
+long kvm_start_tracking(struct kvm_vcpu *vcpu, enum kvm_page_track_mode mode );
+long kvm_stop_tracking(struct kvm_vcpu *vcpu,enum kvm_page_track_mode mode );
 #endif

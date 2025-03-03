@@ -60,6 +60,7 @@
 
 // SEV-STEP
 #include <linux/sev-step/userspace_page_track_api.h>
+#include <linux/sev-step/sev-step.h>
 
 extern bool itlb_multihit_kvm_mitigation;
 
@@ -768,6 +769,9 @@ static void update_gfn_disallow_lpage_count(const struct kvm_memory_slot *slot,
 		linfo = lpage_info_slot(gfn, slot, i);
 		linfo->disallow_lpage += count;
 		WARN_ON(linfo->disallow_lpage < 0);
+        if (linfo->disallow_lpage < 0) {
+			pr_info("%llx, linfo->disallow_lpage: %d, count: %d\n", gfn, linfo->disallow_lpage, count);
+		}
 	}
 }
 
@@ -1230,6 +1234,36 @@ static bool __rmap_protect(struct kvm *kvm,
 	return flush;
 }
 
+static bool spte_write_protect(u64 *sptep, bool pt_protect)
+{
+	u64 spte = *sptep;
+
+	if (!is_writable_pte(spte) &&
+	    !(pt_protect && is_mmu_writable_spte(spte)))
+		return false;
+
+	rmap_printk("spte %p %llx\n", sptep, *sptep);
+
+	if (pt_protect)
+		spte &= ~shadow_mmu_writable_mask;
+	spte = spte & ~PT_WRITABLE_MASK;
+
+	return mmu_spte_update(sptep, spte);
+}
+
+
+static bool rmap_write_protect(struct kvm_rmap_head *rmap_head, bool pt_protect)
+{
+	u64 *sptep;
+	struct rmap_iterator iter;
+	bool flush = false;
+
+	for_each_rmap_spte(rmap_head, &iter, sptep)
+		flush |= spte_write_protect(sptep, pt_protect);
+
+	return flush;
+}
+
 static bool spte_clear_dirty(u64 *sptep)
 {
 	u64 spte = *sptep;
@@ -1387,6 +1421,28 @@ void kvm_arch_mmu_enable_log_dirty_pt_masked(struct kvm *kvm,
 int kvm_cpu_dirty_log_size(void)
 {
 	return kvm_x86_ops.cpu_dirty_log_size;
+}
+
+bool kvm_mmu_slot_gfn_write_protect(struct kvm *kvm,
+				    struct kvm_memory_slot *slot, u64 gfn,
+				    int min_level)
+{
+	struct kvm_rmap_head *rmap_head;
+	int i;
+	bool write_protected = false;
+
+	if (kvm_memslots_have_rmaps(kvm)) {
+		for (i = min_level; i <= KVM_MAX_HUGEPAGE_LEVEL; ++i) {
+			rmap_head = gfn_to_rmap(gfn, i, slot);
+			write_protected |= rmap_write_protect(rmap_head, true);
+		}
+	}
+
+	if (is_tdp_mmu_enabled(kvm))
+		write_protected |= kvm_tdp_mmu_write_protect_gfn(kvm, slot, gfn,
+								 min_level);
+
+	return write_protected;
 }
 
 bool kvm_mmu_slot_gfn_protect(struct kvm *kvm,
@@ -3990,6 +4046,7 @@ static bool page_fault_handle_page_track(struct kvm_vcpu *vcpu,
 			}
 	}
 	
+    heckler_on_page_fault(vcpu, fault);
 
 	/*
 	 * guest is writing the page which is write tracked which can
@@ -6690,4 +6747,32 @@ void kvm_mmu_pre_destroy_vm(struct kvm *kvm)
 {
 	if (kvm->arch.nx_lpage_recovery_thread)
 		kthread_stop(kvm->arch.nx_lpage_recovery_thread);
+}
+
+bool kvm_vcpu_exec_protect_gfn(struct kvm_vcpu *vcpu, u64 gfn, bool flush)
+{
+	struct kvm_memory_slot *slot;
+	bool protected;
+
+
+	slot = kvm_vcpu_gfn_to_memslot(vcpu, gfn);
+	protected = kvm_mmu_slot_gfn_protect(vcpu->kvm, slot, gfn, PG_LEVEL_4K, KVM_PAGE_TRACK_EXEC);
+	if (flush && protected) {
+		kvm_flush_remote_tlbs(vcpu->kvm);
+	}
+	return protected;
+}
+
+bool kvm_vcpu_exec_unprotect_gfn(struct kvm_vcpu *vcpu, u64 gfn, bool flush)
+{
+	struct kvm_memory_slot *slot;
+	bool protected;
+
+
+	slot = kvm_vcpu_gfn_to_memslot(vcpu, gfn);
+	protected = kvm_mmu_slot_gfn_protect(vcpu->kvm, slot, gfn, PG_LEVEL_4K, KVM_PAGE_TRACK_RESET_EXEC);
+	if (flush && protected) {
+		kvm_flush_remote_tlbs(vcpu->kvm);
+	}
+	return protected;
 }

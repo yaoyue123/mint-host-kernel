@@ -165,9 +165,24 @@ typedef struct {
 	/// @brief if true, decrypt vmsa and send information with each event
 	///only works if debug mode is active
 	bool decrypt_vmsa;
+    bool track_boot;
 } usp_init_poll_api_t;
 
-
+typedef struct {
+	char cr3_cr0[16];
+	char rflags_rip[16];
+	char rsp[16];
+	char rax[16];
+	char cr2[16];
+	char rcx[16];
+	char rdx_rbx[16];
+	char rbp[16];
+	char rsi_rdi[16];
+	char r8_r9[16];
+	char r10_r11[16];
+	char r12_r13[16];
+	char r14_r15[16];
+}  __packed vmcb_save_area_encrypt_blobs_t;
 
 /**
  * @brief struct for storing page fault parameters 
@@ -179,6 +194,8 @@ typedef struct {
 	sev_step_partial_vmcb_save_area_t decrypted_vmsa_data;
 	/// @brief if true, decrypted_vmsa_data contains valid data
 	bool is_decrypted_vmsa_data_valid;
+    bool has_vmsa_blob;
+	vmcb_save_area_encrypt_blobs_t vmsa_blob;
 } usp_page_fault_event_t;
 
 /**

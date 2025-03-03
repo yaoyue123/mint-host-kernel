@@ -138,7 +138,7 @@ we also reset have_event
     //wait until we are allowed to send the next event
     //wait for ack, but with tiemout. Otherwise small bugs in userland easily lead
     //to a kernel hang
-    abort_after = ktime_get_ns() + 10ULL * sec_to_nanosec;
+    abort_after = ktime_get_ns() + 30ULL * sec_to_nanosec;
     //printk("usp_send_and_block: waiting with return untill user acked...\n");
     while(1) {
         raw_spinlock_lock(&ctx->shared_mem_region->spinlock);

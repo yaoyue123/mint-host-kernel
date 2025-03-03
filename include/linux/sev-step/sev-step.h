@@ -11,6 +11,7 @@
 #include "idt-gate-desc.h"
 #include "libcache.h"
 #include <uapi/linux/sev-step/sev-step.h>
+#include "userspace_page_track_api.h"
 
 #define CTL_MSR_0  0xc0010200ULL
 #define CTL_MSR_1  0xc0010202ULL
@@ -314,4 +315,41 @@ bool sev_step_is_single_stepping_active(sev_step_config_t* cfg);
  */
 int sev_step_get_vmcb_save_area(struct kvm_vcpu *vcpu, struct vmcb_save_area* vmcb_result,
 	struct sev_es_save_area *vmsa_result);
+
+
+typedef struct {
+    int vector;
+    } inject_interrupt_t;
+
+typedef struct {
+    struct mutex config_mutex;
+    struct kvm* main_vm;
+    int destroyed;
+
+    int do_tracing;
+    int do_tracking;
+    int track_all_pages;
+    int untrack_all_pages;
+    int track_all_pages_flush;
+    int do_inject_vector;
+    int inject_vector;
+    int inject_do_ack;
+    // usp_poll_api_ctx_t *uspt_ctx;
+} heckler_config_t;
+
+struct kvm_page_fault;
+
+extern heckler_config_t heckler_config;
+
+
+int heckler_on_page_fault(struct kvm_vcpu *, struct kvm_page_fault *);
+int heckler_on_vcpu_create(struct kvm *kvm, struct kvm_vcpu* vcpu);
+int heckler_on_vcpu_run(struct kvm_vcpu *);
+int heckler_on_kvm_dev_ioctl(struct file *, unsigned int, unsigned long);
+int heckler_can_handle_kvm_dev_ioctl(struct file *, unsigned int, unsigned long);
+int heckler_on_create_vm(struct kvm*);
+int heckler_on_kvm_destroy_vm(struct kvm*);
+int heckler_on_kvm_init(void);
+int heckler_on_svm_vcpu_enter_exit(struct kvm_vcpu *vcpu);
+
 #endif

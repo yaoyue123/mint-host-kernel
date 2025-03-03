@@ -2191,6 +2191,7 @@ struct kvm_stats_desc {
 //
 // SEV-STEP IOCTLs
 //
+#define KVM_TRACK_BOOT _IOWR(KVMIO, 0xa, track_boot_param_t)
 #define KVM_TRACK_PAGE _IOWR(KVMIO, 0xb, track_page_param_t)
 #define KVM_TRACK_ALL_PAGES _IOWR(KVMIO, 0xc, track_all_pages_t)
 #define KVM_UNTRACK_ALL_PAGES _IOWR(KVMIO, 0xd, track_all_pages_t)
@@ -2199,6 +2200,7 @@ struct kvm_stats_desc {
 #define KVM_USP_CLOSE_POLL_API _IO(KVMIO, 0x10)
 #define KVM_SEV_STEP_ENABLE _IOWR(KVMIO, 0x11, sev_step_param_t)
 #define KVM_SEV_STEP_DISABLE _IO(KVMIO, 0x12)
+#define KVM_INJECT_INTERRUPT _IOWR(KVMIO, 0x1a, inject_interrupt_t)
 /**
  * @brief Injects an nmi into vm upon next vmrun.
  * Should only be called while vm is halted
